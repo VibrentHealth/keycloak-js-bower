@@ -579,8 +579,7 @@
             if ((kc.flow != 'implicit') && code) {
                 var params = 'code=' + code + '&grant_type=authorization_code';
                 var req = new XMLHttpRequest();
-                var URLS = require('../../../../constants')
-                req.open('POST', URLS.API_SET_AUTH_CODE, true);
+                req.open('POST', '/api/setAuthcode', true);
                 req.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
 
                 if (kc.clientId && kc.clientSecret) {
