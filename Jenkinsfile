@@ -78,8 +78,8 @@ podTemplate(
             withCredentials([usernamePassword(credentialsId: VibrentConstants.NEXUS_CREDENTIALS_ID, passwordVariable: 'PASS', usernameVariable: 'USER')]) {
               sh """
                   npm install --registry ${npmregistry}
-                  npm run review
-                  npm run build
+                //   npm run review
+                //   npm run build
               """
             }
           }
