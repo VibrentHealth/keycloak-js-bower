@@ -14,7 +14,7 @@ def vibrentregistry = "https://nex.vibrenthealth.com/repository/vibrent-npm"
 def packageJSON
 def packageVersion
 
-def dev_branch = "develop"
+def dev_branch = "master"
 
 podTemplate(
     cloud:'default', name: label, label:label, imagePullSecrets: pullSecrets,
@@ -32,7 +32,7 @@ podTemplate(
       baseVersion = "${env.BUILD_NUMBER}"
       version = "$branch-$baseVersion"
       env.PROJECT = "keycloak-js-bower"
-      if (branch == 'develop' || branchType == 'release') {
+      if (branch == 'master' || branchType == 'release') {
           env.BRANCH_BUILD = "$branch-$baseVersion"
       }
       def branchCheckout
@@ -100,17 +100,17 @@ podTemplate(
         },
         deploy: {
           container('node') {
-            if (branch == 'develop' || branchType == 'release') {
+            if (branch == 'master' || branchType == 'release') {
               stage('Publish to npm') {
                 withCredentials([usernamePassword(credentialsId: VibrentConstants.NEXUS_CREDENTIALS_ID, passwordVariable: 'PASS', usernameVariable: 'USER')]) {
                   sh """
                     npm i -g npm-cli-login
                     NPM_USER="${USER}" NPM_PASS="${PASS}" NPM_EMAIL="mcdev@vibrenthealth.com" NPM_REGISTRY="${vibrentregistry}" npm-cli-login
                   """
-                  if (branch == 'develop') {
+                  if (branch == 'master') {
                     sh """
                       # publish
-                      npm publish --tag next --tag develop --tag latest --registry=${vibrentregistry} --scope=@vibrent
+                      npm publish --tag next --tag master --tag latest --registry=${vibrentregistry} --scope=@vibrent
                       """
                   }
                   if (branchType == 'release') {
