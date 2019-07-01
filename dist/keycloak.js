@@ -14,9 +14,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
+/* eslint-disable */
 (function( window, undefined ) {
-
+ 
     var Keycloak = function (config) {
         if (!(this instanceof Keycloak)) {
             return new Keycloak(config);
@@ -30,7 +30,7 @@
         var loginIframe = {
             enable: true,
             callbackList: [],
-            interval: 5
+            interval: 0
         };
 
         var scripts = document.getElementsByTagName('script');
@@ -46,11 +46,10 @@
             kc.authenticated = false;
 
             callbackStorage = createCallbackStorage();
+            var adapters = ['default', 'cordova', 'cordova-native'];
 
-            if (initOptions && initOptions.adapter === 'cordova') {
-                adapter = loadAdapter('cordova');
-            } else if (initOptions && initOptions.adapter === 'default') {
-                adapter = loadAdapter();
+            if (initOptions && adapters.indexOf(initOptions.adapter) > -1) {
+                adapter = loadAdapter(initOptions.adapter);
             } else if (initOptions && typeof initOptions.adapter === "object") {
                 adapter = initOptions.adapter;
             } else {
@@ -72,6 +71,12 @@
 
                 if (initOptions.checkLoginIframeInterval) {
                     loginIframe.interval = initOptions.checkLoginIframeInterval;
+                }
+
+                if (initOptions.promiseType === 'native') {
+                    kc.useNativePromise = typeof Promise === "function";
+                } else {
+                    kc.useNativePromise = false;
                 }
 
                 if (initOptions.onLoad === 'login-required') {
@@ -106,6 +111,10 @@
                 if (initOptions.timeSkew != null) {
                     kc.timeSkew = initOptions.timeSkew;
                 }
+
+                if(initOptions.redirectUri) {
+                    kc.redirectUri = initOptions.redirectUri;
+                }
             }
 
             if (!kc.responseMode) {
@@ -116,9 +125,9 @@
                 kc.flow = 'standard';
             }
 
-            var promise = createPromise();
+            var promise = createPromise(false);
 
-            var initPromise = createPromise();
+            var initPromise = createPromise(true);
             initPromise.promise.success(function() {
                 kc.onReady && kc.onReady(kc.authenticated);
                 promise.setSuccess(kc.authenticated);
@@ -145,10 +154,14 @@
                     case 'check-sso':
                         if (loginIframe.enable) {
                             setupCheckLoginIframe().success(function() {
-                                checkLoginIframe().success(function () {
-                                    doLogin(false);
+                                checkLoginIframe().success(function (unchanged) {
+                                    if (!unchanged) {
+                                        doLogin(false);
+                                    } else {
+                                        initPromise.setSuccess();
+                                    }
                                 }).error(function () {
-                                    initPromise.setSuccess();
+                                    initPromise.setError();
                                 });
                             });
                         } else {
@@ -167,7 +180,7 @@
                 var callback = parseCallback(window.location.href);
 
                 if (callback) {
-                    window.history.replaceState({}, null, callback.newUrl);
+                    window.history.replaceState(window.history.state, null, callback.newUrl);
                 }
 
                 if (callback && callback.valid) {
@@ -177,17 +190,21 @@
                         initPromise.setError();
                     });
                 } else if (initOptions) {
-                    if (initOptions.token && initOptions.refreshToken) {
-                        setToken(initOptions.token, initOptions.refreshToken, initOptions.idToken);
+                    if (initOptions.token) {
+                        setToken(initOptions.token, initOptions.idToken);
 
                         if (loginIframe.enable) {
                             setupCheckLoginIframe().success(function() {
-                                checkLoginIframe().success(function () {
-                                    kc.onAuthSuccess && kc.onAuthSuccess();
-                                    initPromise.setSuccess();
+                                checkLoginIframe().success(function (unchanged) {
+                                    if (unchanged) {
+                                        kc.onAuthSuccess && kc.onAuthSuccess();
+                                        initPromise.setSuccess();
+                                        scheduleCheckIframe();
+                                    } else {
+                                        initPromise.setSuccess();
+                                    }
                                 }).error(function () {
-                                    setToken(null, null, null);
-                                    initPromise.setSuccess();
+                                    initPromise.setError();
                                 });
                             });
                         } else {
@@ -250,7 +267,16 @@
                 baseUrl = kc.endpoints.authorize();
             }
 
-            var scope = (options && options.scope) ? "openid " + options.scope : "openid";
+            var scope;
+            if (options && options.scope) {
+                if (options.scope.indexOf("openid") != -1) {
+                    scope = options.scope;
+                } else {
+                    scope = "openid " + options.scope;
+                }
+            } else {
+                scope = "openid";
+            }
 
             var url = baseUrl
                 + '?client_id=' + encodeURIComponent(kc.clientId)
@@ -350,7 +376,7 @@
             req.setRequestHeader('Accept', 'application/json');
             req.setRequestHeader('Authorization', 'bearer ' + kc.token);
 
-            var promise = createPromise();
+            var promise = createPromise(false);
 
             req.onreadystatechange = function () {
                 if (req.readyState == 4) {
@@ -375,7 +401,7 @@
             req.setRequestHeader('Accept', 'application/json');
             req.setRequestHeader('Authorization', 'bearer ' + kc.token);
 
-            var promise = createPromise();
+            var promise = createPromise(false);
 
             req.onreadystatechange = function () {
                 if (req.readyState == 4) {
@@ -411,7 +437,7 @@
         }
 
         kc.updateToken = function(minValidity) {
-            var promise = createPromise();
+            var promise = createPromise(false);
 
             if (!kc.refreshToken) {
                 promise.setError();
@@ -550,14 +576,12 @@
             } else if ((kc.flow != 'standard') && (oauth.access_token || oauth.id_token)) {
                 authSuccess(oauth.access_token, null, oauth.id_token, true);
             }
-
             if ((kc.flow != 'implicit') && code) {
                 var params = 'code=' + code + '&grant_type=authorization_code';
-                var url = kc.endpoints.token();
-
                 var req = new XMLHttpRequest();
-                req.open('POST', url, true);
-                req.setRequestHeader('Content-type', 'application/x-www-form-urlencoded');
+                var URLS = require('../../../../constants')
+                req.open('POST', URLS.API_SET_AUTH_CODE, true);
+                req.setRequestHeader("Content-Type", "application/json;charset=UTF-8");
 
                 if (kc.clientId && kc.clientSecret) {
                     req.setRequestHeader('Authorization', 'Basic ' + btoa(kc.clientId + ':' + kc.clientSecret));
@@ -574,7 +598,8 @@
                         if (req.status == 200) {
 
                             var tokenResponse = JSON.parse(req.responseText);
-                            authSuccess(tokenResponse['access_token'], tokenResponse['refresh_token'], tokenResponse['id_token'], kc.flow === 'standard');
+                            authSuccess(tokenResponse.data['access_token'], tokenResponse.data['id_token'], kc.flow === 'standard');
+                            scheduleCheckIframe();
                         } else {
                             kc.onAuthError && kc.onAuthError();
                             promise && promise.setError();
@@ -582,16 +607,16 @@
                     }
                 };
 
-                req.send(params);
+                req.send(JSON.stringify(oauth));
             }
 
-            function authSuccess(accessToken, refreshToken, idToken, fulfillPromise) {
+            function authSuccess(accessToken, idToken, fulfillPromise) {
+                
                 timeLocal = (timeLocal + new Date().getTime()) / 2;
 
-                setToken(accessToken, refreshToken, idToken, timeLocal);
+                setToken(accessToken, idToken, timeLocal);
 
                 if (useNonce && ((kc.tokenParsed && kc.tokenParsed.nonce != oauth.storedNonce) ||
-                    (kc.refreshTokenParsed && kc.refreshTokenParsed.nonce != oauth.storedNonce) ||
                     (kc.idTokenParsed && kc.idTokenParsed.nonce != oauth.storedNonce))) {
 
                     console.info('[KEYCLOAK] Invalid nonce, clearing token');
@@ -608,7 +633,7 @@
         }
 
         function loadConfig(url) {
-            var promise = createPromise();
+            var promise = createPromise(true);
             var configUrl;
 
             if (!config) {
@@ -700,11 +725,10 @@
 
                 req.send();
             } else {
-                if (!config.clientId) {
-                    throw 'clientId missing';
-                }
-
-                kc.clientId = config.clientId;
+                // if (!config.clientId) {
+                //     throw 'clientId missing';
+                // }
+                kc.clientId = config.resource;
                 kc.clientSecret = (config.credentials || {}).secret;
 
                 var oidcProvider = config['oidcProvider'];
@@ -722,7 +746,7 @@
                         throw 'realm missing';
                     }
 
-                    kc.authServerUrl = config.url;
+                    kc.authServerUrl = config['auth-server-url'];
                     kc.realm = config.realm;
                     setupOidcEndoints(null);
                     promise.setSuccess();
@@ -765,18 +789,10 @@
             return xhr.status == 0 && xhr.responseText && xhr.responseURL.startsWith('file:');
         }
 
-        function setToken(token, refreshToken, idToken, timeLocal) {
+        function setToken(token, idToken, timeLocal) {
             if (kc.tokenTimeoutHandle) {
                 clearTimeout(kc.tokenTimeoutHandle);
                 kc.tokenTimeoutHandle = null;
-            }
-
-            if (refreshToken) {
-                kc.refreshToken = refreshToken;
-                kc.refreshTokenParsed = decodeToken(refreshToken);
-            } else {
-                delete kc.refreshToken;
-                delete kc.refreshTokenParsed;
             }
 
             if (idToken) {
@@ -898,7 +914,7 @@
                     supportedParams = ['code', 'state', 'session_state'];
                     break;
                 case 'implicit':
-                    supportedParams = ['access_token', 'id_token', 'state', 'session_state'];
+                    supportedParams = ['access_token', 'token_type', 'id_token', 'state', 'session_state', 'expires_in'];
                     break;
                 case 'hybrid':
                     supportedParams = ['access_token', 'id_token', 'code', 'state', 'session_state'];
@@ -967,8 +983,8 @@
             return result;
         }
 
-        function createPromise() {
-            if (typeof Promise === "function") {
+        function createPromise(internal) {
+            if (!internal && kc.useNativePromise) {
                 return createNativePromise();
             } else {
                 return createLegacyPromise();
@@ -980,12 +996,10 @@
             // interface of the custom promise type previously used by the API
             var p = {
                 setSuccess: function(result) {
-                    p.success = true;
                     p.resolve(result);
                 },
 
                 setError: function(result) {
-                    p.success = false;
                     p.reject(result);
                 }
             };
@@ -993,14 +1007,6 @@
                 p.resolve = resolve;
                 p.reject = reject;
             });
-            p.promise.success = function(callback) {
-                p.promise.then(callback);
-                return p.promise;
-            }
-            p.promise.error = function(callback) {
-                p.promise.catch(callback);
-                return p.promise;
-            }
             return p;
         }
 
@@ -1045,7 +1051,7 @@
         }
 
         function setupCheckLoginIframe() {
-            var promise = createPromise();
+            var promise = createPromise(true);
 
             if (!loginIframe.enable) {
                 promise.setSuccess();
@@ -1068,8 +1074,6 @@
                     loginIframe.iframeOrigin = authUrl.substring(0, authUrl.indexOf('/', 8));
                 }
                 promise.setSuccess();
-
-                setTimeout(check, loginIframe.interval * 1000);
             }
 
             var src = kc.endpoints.checkSessionIframe();
@@ -1096,31 +1100,38 @@
 
                 for (var i = callbacks.length - 1; i >= 0; --i) {
                     var promise = callbacks[i];
-                    if (event.data == 'unchanged') {
-                        promise.setSuccess();
-                    } else {
+                    if (event.data == 'error') {
                         promise.setError();
+                    } else {
+                        promise.setSuccess(event.data == 'unchanged');
                     }
                 }
             };
 
             window.addEventListener('message', messageCallback, false);
 
-            var check = function() {
-                checkLoginIframe();
-                if (kc.token) {
-                    setTimeout(check, loginIframe.interval * 1000);
-                }
-            };
-
             return promise.promise;
         }
 
+        function scheduleCheckIframe() {
+            if (loginIframe.enable) {
+                if (kc.token) {
+                    setTimeout(function() {
+                        checkLoginIframe().success(function(unchanged) {
+                            if (unchanged) {
+                                scheduleCheckIframe();
+                            }
+                        });
+                    }, loginIframe.interval * 0);
+                }
+            }
+        }
+
         function checkLoginIframe() {
-            var promise = createPromise();
+            var promise = createPromise(true);
 
             if (loginIframe.iframe && loginIframe.iframeOrigin ) {
-                var msg = kc.clientId + ' ' + kc.sessionId;
+                var msg = kc.clientId + ' ' + (kc.sessionId ? kc.sessionId : '');
                 loginIframe.callbackList.push(promise);
                 var origin = loginIframe.iframeOrigin;
                 if (loginIframe.callbackList.length == 1) {
@@ -1137,17 +1148,17 @@
             if (!type || type == 'default') {
                 return {
                     login: function(options) {
-                        window.location.href = kc.createLoginUrl(options);
+                        window.location.replace(kc.createLoginUrl(options));
                         return createPromise().promise;
                     },
 
                     logout: function(options) {
-                        window.location.href = kc.createLogoutUrl(options);
+                        window.location.replace(kc.createLogoutUrl(options));
                         return createPromise().promise;
                     },
 
                     register: function(options) {
-                        window.location.href = kc.createRegisterUrl(options);
+                        window.location.replace(kc.createRegisterUrl(options));
                         return createPromise().promise;
                     },
 
@@ -1158,7 +1169,7 @@
                         } else {
                             throw "Not supported by the OIDC server";
                         }
-                        return createPromise().promise;
+                        return createPromise(false).promise;
                     },
 
                     redirectUri: function(options, encodeHash) {
@@ -1187,24 +1198,54 @@
                         return window.open(loginUrl, target, options);
                     }
                 };
+
+                var shallowCloneCordovaOptions = function (userOptions) {
+                    if (userOptions && userOptions.cordovaOptions) {
+                        return Object.keys(userOptions.cordovaOptions).reduce(function (options, optionName) {
+                            options[optionName] = userOptions.cordovaOptions[optionName];
+                            return options;
+                        }, {});
+                    } else {
+                        return {};
+                    }
+                };
+
+                var formatCordovaOptions = function (cordovaOptions) {
+                    return Object.keys(cordovaOptions).reduce(function (options, optionName) {
+                        options.push(optionName+"="+cordovaOptions[optionName]);
+                        return options;
+                    }, []).join(",");
+                };
+
+                var createCordovaOptions = function (userOptions) {
+                    var cordovaOptions = shallowCloneCordovaOptions(userOptions);
+                    cordovaOptions.location = 'no';
+                    if (userOptions && userOptions.prompt == 'none') {
+                        cordovaOptions.hidden = 'yes';
+                    }                    
+                    return formatCordovaOptions(cordovaOptions);
+                };
+
                 return {
                     login: function(options) {
-                        var promise = createPromise();
+                        var promise = createPromise(false);
 
-                        var o = 'location=no';
-                        if (options && options.prompt == 'none') {
-                            o += ',hidden=yes';
-                        }
-
+                        var cordovaOptions = createCordovaOptions(options);
                         var loginUrl = kc.createLoginUrl(options);
-                        var ref = cordovaOpenWindowWrapper(loginUrl, '_blank', o);
+                        var ref = cordovaOpenWindowWrapper(loginUrl, '_blank', cordovaOptions);
                         var completed = false;
+                        
+                        var closed = false;
+                        var closeBrowser = function() {
+                            closed = true;
+                            ref.close();
+                        };
 
                         ref.addEventListener('loadstart', function(event) {
                             if (event.url.indexOf('http://localhost') == 0) {
                                 var callback = parseCallback(event.url);
                                 processCallback(callback, promise);
-                                ref.close();
+                                closeBrowser();
                                 completed = true;
                             }
                         });
@@ -1214,12 +1255,20 @@
                                 if (event.url.indexOf('http://localhost') == 0) {
                                     var callback = parseCallback(event.url);
                                     processCallback(callback, promise);
-                                    ref.close();
+                                    closeBrowser();
                                     completed = true;
                                 } else {
                                     promise.setError();
-                                    ref.close();
+                                    closeBrowser();
                                 }
+                            }
+                        });
+
+                        ref.addEventListener('exit', function(event) {
+                            if (!closed) {
+                                promise.setError({
+                                    reason: "closed_by_user"
+                                });
                             }
                         });
 
@@ -1227,8 +1276,8 @@
                     },
 
                     logout: function(options) {
-                        var promise = createPromise();
-
+                        var promise = createPromise(false);
+                        
                         var logoutUrl = kc.createLogoutUrl(options);
                         var ref = cordovaOpenWindowWrapper(logoutUrl, '_blank', 'location=no,hidden=yes');
 
@@ -1263,7 +1312,8 @@
 
                     register : function() {
                         var registerUrl = kc.createRegisterUrl();
-                        var ref = cordovaOpenWindowWrapper(registerUrl, '_blank', 'location=no');
+                        var cordovaOptions = createCordovaOptions(options);
+                        var ref = cordovaOpenWindowWrapper(registerUrl, '_blank', cordovaOptions);
                         ref.addEventListener('loadstart', function(event) {
                             if (event.url.indexOf('http://localhost') == 0) {
                                 ref.close();
@@ -1287,6 +1337,75 @@
 
                     redirectUri: function(options) {
                         return 'http://localhost';
+                    }
+                }
+            }
+
+            if (type == 'cordova-native') {
+                loginIframe.enable = false;
+
+                return {
+                    login: function(options) {
+                        var promise = createPromise(false);
+                        var loginUrl = kc.createLoginUrl(options);
+
+                        universalLinks.subscribe('keycloak', function(event) {
+                            universalLinks.unsubscribe('keycloak');
+                            window.cordova.plugins.browsertab.close();
+                            var oauth = parseCallback(event.url);
+                            processCallback(oauth, promise);
+                        });
+
+                        window.cordova.plugins.browsertab.openUrl(loginUrl);
+                        return promise.promise;
+                    },
+
+                    logout: function(options) {
+                        var promise = createPromise(false);
+                        var logoutUrl = kc.createLogoutUrl(options);
+
+                        universalLinks.subscribe('keycloak', function(event) {
+                            universalLinks.unsubscribe('keycloak');
+                            window.cordova.plugins.browsertab.close();
+                            kc.clearToken();
+                            promise.setSuccess();
+                        });
+
+                        window.cordova.plugins.browsertab.openUrl(logoutUrl);
+                        return promise.promise;
+                    },
+
+                    register : function(options) {
+                        var promise = createPromise(false);
+                        var registerUrl = kc.createRegisterUrl(options);
+                        universalLinks.subscribe('keycloak' , function(event) {
+                            universalLinks.unsubscribe('keycloak');
+                            window.cordova.plugins.browsertab.close();
+                            var oauth = parseCallback(event.url);
+                            processCallback(oauth, promise);
+                        });
+                        window.cordova.plugins.browsertab.openUrl(registerUrl);
+                        return promise.promise;
+
+                    },
+
+                    accountManagement : function() {
+                        var accountUrl = kc.createAccountUrl();
+                        if (typeof accountUrl !== 'undefined') {
+                            window.cordova.plugins.browsertab.openUrl(accountUrl);
+                        } else {
+                            throw "Not supported by the OIDC server";
+                        }
+                    },
+
+                    redirectUri: function(options) {
+                        if (options && options.redirectUri) {
+                            return options.redirectUri;
+                        } else if (kc.redirectUri) {
+                            return kc.redirectUri;
+                        } else {
+                            return "http://localhost";
+                        }
                     }
                 }
             }
