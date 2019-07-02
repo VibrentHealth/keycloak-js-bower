@@ -88,7 +88,7 @@ podTemplate(
           container('node') {
             try {
                sh """
-                   npm run test
+                  //  npm run test
                """
             } catch (Exception ex) {
               echo '[FAILURE] - test failure'
