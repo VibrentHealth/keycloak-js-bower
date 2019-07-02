@@ -73,31 +73,6 @@ podTemplate(
             ])
           }
         },
-        build:{
-          container('node') {
-            withCredentials([usernamePassword(credentialsId: VibrentConstants.NEXUS_CREDENTIALS_ID, passwordVariable: 'PASS', usernameVariable: 'USER')]) {
-              sh """
-                  npm install --registry ${npmregistry}
-                //   npm run review
-                //   npm run build
-              """
-            }
-          }
-        },
-        unitTest:{
-          container('node') {
-            try {
-               sh """
-                  //  npm run test
-               """
-            } catch (Exception ex) {
-              echo '[FAILURE] - test failure'
-            }
-          }
-        },
-        sonar: {
-          runSonarAnalysis (project: env.PROJECT, tool: 'scanner', sonarBranch: env.BRANCH_NAME, projectVersion: version, sonarReportPaths: 'coverage/lcov.info')
-        },
         deploy: {
           container('node') {
             if (branch == 'master' || branchType == 'release') {
