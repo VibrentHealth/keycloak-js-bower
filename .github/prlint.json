@@ -9,7 +9,9 @@
   "body": [
     {
       "pattern": "(AC|MC|MTW|SRE|RE)-\\d{1,9}",
-      "flags": ["i"],
+      "flags": [
+        "i"
+      ],
       "message": "You need a JIRA ticket in your description",
       "detailsURL": "https://agile.vignetcorp.com:8085/jira/secure/Dashboard.jspa"
     },
@@ -35,7 +37,7 @@
   ],
   "additions": [
     {
-      "pattern": "0|^[1-9]$|^[1-9]$|^[1-9]\\d$",
+      "pattern": "0|^[1-9]$|^[1-9]\\d$|^[1-9]\\d\\d$",
       "message": "Your PR is too big (over 999 additions)",
       "detailsURL": "https://github.com/VibrentHealth/keycloak-js-bower/blob/master/.github/prlint.json"
     }
